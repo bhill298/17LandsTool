@@ -30,9 +30,8 @@ import sys
 import time
 import traceback
 import urllib.request
-import uuid
 
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 
 LOG_FOLDER = os.path.join(os.path.expanduser('~'), '.seventeenlands')
 if not os.path.exists(LOG_FOLDER):
@@ -50,14 +49,6 @@ for handler in handlers:
     logger.addHandler(handler)
 logger.setLevel(logging.ERROR)
 logger.info(f'Saving logs to {LOG_FILENAME}')
-
-CLIENT_VERSION = '0.1.31.p'
-
-TOKEN_ENTRY_TITLE = 'MTGA Log Client Token'
-TOKEN_ENTRY_MESSAGE = 'Please enter your client token from 17lands.com/account: '
-TOKEN_MISSING_TITLE = 'Error: Client Token Needed'
-TOKEN_MISSING_MESSAGE = 'Error: The program cannot continue without specifying a client token. Exiting.'
-TOKEN_INVALID_MESSAGE = 'That token is invalid. Please specify a valid client token. See 17lands.com/getting_started for more details.'
 
 FILE_UPDATED_FORCE_REFRESH_SECONDS = 60
 
@@ -84,8 +75,6 @@ POSSIBLE_ROOTS = (
 POSSIBLE_CURRENT_FILEPATHS = list(map(lambda root_and_path: os.path.join(*root_and_path), itertools.product(POSSIBLE_ROOTS, (CURRENT_LOG_PATH, ))))
 POSSIBLE_PREVIOUS_FILEPATHS = list(map(lambda root_and_path: os.path.join(*root_and_path), itertools.product(POSSIBLE_ROOTS, (PREVIOUS_LOG_PATH, ))))
 
-CONFIG_FILE = os.path.join(os.path.expanduser('~'), '.mtga_follower.ini')
-
 LOG_START_REGEX_TIMED = re.compile(r'^\[(UnityCrossThreadLogger|Client GRE)\]([\d:/ .-]+(AM|PM)?)')
 LOG_START_REGEX_UNTIMED = re.compile(r'^\[(UnityCrossThreadLogger|Client GRE)\]')
 TIMESTAMP_REGEX = re.compile('^([\\d/.-]+[ T][\\d]+:[\\d]+:[\\d]+( AM| PM)?)')
@@ -105,32 +94,6 @@ TIME_FORMATS = (
     '%d/%m/%Y %H:%M:%S',
     '%d.%m.%Y %H:%M:%S'
 )
-OUTPUT_TIME_FORMAT = '%Y%m%d%H%M%S'
-
-API_ENDPOINT = 'https://www.17lands.com'
-ENDPOINT_USER = 'api/account'
-ENDPOINT_DECK_SUBMISSION = 'deck'
-ENDPOINT_EVENT_SUBMISSION = 'event'
-ENDPOINT_EVENT_COURSE_SUBMISSION = 'event_course'
-ENDPOINT_GAME_RESULT = 'game'
-ENDPOINT_DRAFT_PACK = 'pack'
-ENDPOINT_DRAFT_PICK = 'pick'
-ENDPOINT_HUMAN_DRAFT_PICK = 'human_draft_pick'
-ENDPOINT_HUMAN_DRAFT_PACK = 'human_draft_pack'
-ENDPOINT_COLLECTION = 'collection'
-ENDPOINT_INVENTORY = 'inventory'
-ENDPOINT_PLAYER_PROGRESS = 'player_progress'
-ENDPOINT_CLIENT_VERSION = 'api/version_validation'
-ENDPOINT_RANK = 'api/rank'
-ENDPOINT_ONGOING_EVENTS = 'ongoing_events'
-ENDPOINT_EVENT_ENDED = 'event_ended'
-
-RETRIES = 2
-IS_CODE_FOR_RETRY = lambda code: code >= 500 and code < 600
-IS_SUCCESS_CODE = lambda code: code >= 200 and code < 300
-DEFAULT_RETRY_SLEEP_TIME = 1
-
-
 
 
 def file_age_in_seconds(pathname):
@@ -236,7 +199,8 @@ class Follower:
         self.card_rankings = self.__get_17lands_data()
         print("Init done")
 
-    def __get_17lands_data(self):
+    @staticmethod
+    def __get_17lands_data():
         data = {}
         for filename in os.listdir():
             if filename.endswith("17lands.json"):
@@ -245,7 +209,8 @@ class Follower:
         print(f"Got 17lands data for {list(data.keys())}")
         return data
 
-    def __get_scryfall_data(self):
+    @staticmethod
+    def __get_scryfall_data():
         FILE_NAME = 'card_data.json'
         file_age = file_age_in_seconds(FILE_NAME)
         if file_age is None or file_age > (60 * 60 * 24 * 7):
@@ -395,11 +360,16 @@ class Follower:
         BLACKLIST = set(("Plains", "Island", "Swamp", "Mountain", "Forest"))
         # card_ids is a list of ints
         # draft event seems to be in the format EventType_SetName_Date
-        draft_set = self.cur_draft_event.split('_')[1].upper()
+        try:
+            draft_set = self.cur_draft_event.split('_')[1].upper()
+        except IndexError:
+            raise RuntimeError(f"Unexpected format for draft event name {self.cur_draft_event}")
+        except AttributeError:
+            raise RuntimeError("Tried to rank cards with draft event unset")
         try:
             card_rankings = self.card_rankings[draft_set]
         except KeyError:
-            raise KeyError(f"Don't have 17lands data for for {draft_set}!")
+            raise RuntimeError(f"Don't have 17lands data for for {draft_set}!")
         # list of 2-tuples (name, percent GIH WR)
         results = []
         failed = []
@@ -407,15 +377,16 @@ class Follower:
             card_name = self.__arena_id_to_card_name(card_id)
             if card_name in BLACKLIST:
                 continue
-            try:
-                print(card_name)
-                results.append((card_name, card_rankings[card_name]))
-            except KeyError:
+            card_rank = card_rankings.get(card_name, None)
+            if card_rank is None or card_rank[-1] != '%':
                 failed.append((card_name, "???"))
-                logger.warning(f"Warning: Failed to get rank for card {card_name}")
+                logger.warning(f"Warning: Failed to get rank for card {card_name}, got rank string {card_rank}")
+            else:
+                results.append((card_name, card_rank))
         results.sort(key=lambda el: float(el[1][:-1]))
         results.reverse()
-        clear_console()
+        #clear_console()
+        print("\n\n")
         pprint.pprint(results + failed)
 
     def __handle_blob(self, full_log):
@@ -953,16 +924,6 @@ class Follower:
         self.user_screen_name = self.disconnected_screen_name
 
 
-def validate_uuid_v4(maybe_uuid):
-    if maybe_uuid is None:
-        return None
-    try:
-        uuid.UUID(maybe_uuid, version=4)
-        return maybe_uuid
-    except ValueError:
-        return None
-
-
 def show_dialog_mac(title, message):
     subprocess.run(['osascript', '-e', f'display dialog "{message}" with title "{title}" buttons {{"OK"}} default button "OK"'], capture_output=True)
 
@@ -984,21 +945,6 @@ def show_message(title, message):
     except ModuleNotFoundError:
         logger.exception('Could not suitably show message')
         logger.warning(message)
-
-
-def show_update_message(response_data):
-    title = '17Lands'
-    if 'upgrade_instructions' in response_data:
-        message = response_data['upgrade_instructions']
-    else:
-        message = ('17Lands update required! The minimum supported version for the client is '
-            + f'{response_data.get("min_version", "newer than your current version")}. '
-            + f'Your current version is {CLIENT_VERSION}. Please update with one of the following '
-            + 'commands in the terminal, depending on your installation method:\n'
-            + 'brew update && brew upgrade seventeenlands\n'
-            + 'pip3 install --user --upgrade seventeenlands')
-
-    show_message(title, message)
 
 
 def processing_loop(args):
