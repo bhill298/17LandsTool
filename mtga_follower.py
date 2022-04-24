@@ -193,6 +193,7 @@ class Follower:
         self.drawn_cards_by_instance_id = defaultdict(dict)
         self.cards_in_hand = defaultdict(list)
         self.user_screen_name = None
+        self.new_draft = False
         self.screen_names = defaultdict(lambda: '')
         self.game_history_events = []
         self.scryfall_data = self.__get_scryfall_data()
@@ -358,6 +359,7 @@ class Follower:
             return None
 
     def __rank_cards(self, card_ids):
+        self.new_draft = False
         BLACKLIST = set(("Plains", "Island", "Swamp", "Mountain", "Forest"))
         # card_ids is a list of ints
         # draft event seems to be in the format EventType_SetName_Date
@@ -379,7 +381,7 @@ class Follower:
             if card_name in BLACKLIST:
                 continue
             card_rank = card_rankings.get(card_name, None)
-            if card_rank is None or card_rank[-1] != '%':
+            if card_rank is None or len(card_rank) == 0 or card_rank[-1] != '%':
                 failed.append((card_name, "???"))
                 logger.warning(f"Warning: Failed to get rank for card {card_name}, got rank string {card_rank}")
             else:
@@ -777,6 +779,7 @@ class Follower:
         """Handle 'Event_Join' messages."""
         self.__clear_game_data()
         self.cur_draft_event = json_obj['EventName']
+        self.new_draft = True
 
         logger.info(f'Joined draft pod: {self.cur_draft_event}')
 
@@ -794,7 +797,8 @@ class Follower:
             'card_ids': json_obj['CardsInPack'],
             'method': 'LogBusiness',
         }
-        self.__rank_cards(pack['card_ids'])
+        if self.new_draft:
+            self.__rank_cards(pack['card_ids'])
         logger.info(f'Human draft pack (combined): {pack}')
         pick = {
             'player_id': self.cur_user,
