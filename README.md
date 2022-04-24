@@ -9,7 +9,9 @@ Parse 17Lands data and display GIH winrates during a draft. Logs parser code bas
 5. Enable detailed logs in MTGA with `Options -> Account -> Detailed Logs`
 6. Run `mtga_follower.py` then launch MTGA and start a draft. The first launch may take a while because it has to download the json file from scryfall (this will happen weekly by default). The console will show all the picks sorted by GIH winrate.
 
-## Caveats
+## Caveats and Issues
 17Lands may rate limit you if you try to run the `get_17lands_files.py` script too much. Parsing the large scryfall card data json file consumes a lot of memory temporarily (several GB). This is command line only and has no GUI.
+
+Card winrates will not be shown for pack 1 pick 1 from what I've tested. As far as I can tell, arena just isn't generating the events for this, so can't really do anything about it right now.
 
 I threw this together in a few hours so don't expect too much.
