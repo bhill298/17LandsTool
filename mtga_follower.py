@@ -220,7 +220,8 @@ class Follower:
                 if dat['name'] == "Default Cards":
                     urllib.request.urlretrieve(dat['download_uri'], FILE_NAME)
                     break
-            raise RuntimeError("Could not fetch file from scryfall")
+            else:
+                raise RuntimeError("Could not fetch file from scryfall")
         # post-process data
         out_dict = {}
         with open(FILE_NAME, 'r', encoding='utf-8') as f:
