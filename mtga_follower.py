@@ -196,6 +196,10 @@ class Follower:
         self.new_draft = False
         self.screen_names = defaultdict(lambda: '')
         self.game_history_events = []
+        # (pack_number: int, pick_number: int) -> [card_ids: int]
+        self.seen_packs = {}
+        # (pack_number: int, pick_number: int) -> card_ids: int
+        self.seen_picks = {}
         self.scryfall_data = self.__get_scryfall_data()
         self.card_rankings = self.__get_17lands_data()
         print("Init done")
@@ -358,6 +362,19 @@ class Follower:
         except ValueError:
             return None
 
+    def __get_missing_cards(self, pack, pick):
+        NUM_PLAYERS = 8
+        pack_pick = (pack, pick)
+        if pick > NUM_PLAYERS:
+            original_pick = pick - NUM_PLAYERS
+            if (pack, original_pick) in self.seen_packs:
+                original_pack = self.seen_packs[(pack, original_pick)] - set([self.seen_picks[(pack, original_pick)]])
+                if (pack, pick) in self.seen_packs:
+                    missing_cards = original_pack - self.seen_packs[(pack, pick)]
+                    print(f"Missing cards for pack {pack} pick {pick}:")
+                    pprint.pprint([self.__arena_id_to_card_name(card_id) for card_id in missing_cards])
+                    print('')
+
     def __rank_cards(self, card_ids):
         self.new_draft = False
         BLACKLIST = set(("Plains", "Island", "Swamp", "Mountain", "Forest"))
@@ -388,9 +405,9 @@ class Follower:
                 results.append((card_name, card_rank))
         results.sort(key=lambda el: float(el[1][:-1]))
         results.reverse()
-        #clear_console()
-        print("\n\n")
+        print("Card rankings:")
         pprint.pprint(results + failed)
+        print("\n\n")
 
     def __handle_blob(self, full_log):
         """Attempt to parse a complete log message and send the data if relevant."""
@@ -759,6 +776,8 @@ class Follower:
                 'card_ids': [int(x) for x in json_obj['DraftPack']],
             }
             logger.info(f'Draft pack: {pack}')
+            self.seen_packs[(pack['pack_number'], pack['pick_number'])] = set(pack['card_ids'])
+            self.__get_missing_cards(pack['pack_number'], pack['pick_number'])
             self.__rank_cards(pack['card_ids'])
 
     def __handle_bot_draft_pick(self, json_obj):
@@ -773,6 +792,7 @@ class Follower:
             'pick_number': int(json_obj['PickNumber']),
             'card_id': int(json_obj['CardId']),
         }
+        self.seen_picks[(pick['pack_number'], pick['pick_number'])] = pick['card_id']
         logger.info(f'Draft pick: {pick}')
 
     def __handle_joined_pod(self, json_obj):
@@ -780,6 +800,8 @@ class Follower:
         self.__clear_game_data()
         self.cur_draft_event = json_obj['EventName']
         self.new_draft = True
+        self.seen_packs = {}
+        self.seen_picks = {}
 
         logger.info(f'Joined draft pod: {self.cur_draft_event}')
 
@@ -797,8 +819,6 @@ class Follower:
             'card_ids': json_obj['CardsInPack'],
             'method': 'LogBusiness',
         }
-        if self.new_draft:
-            self.__rank_cards(pack['card_ids'])
         logger.info(f'Human draft pack (combined): {pack}')
         pick = {
             'player_id': self.cur_user,
@@ -811,6 +831,11 @@ class Follower:
             'auto_pick': json_obj['AutoPick'],
             'time_remaining': json_obj['TimeRemainingOnPick'],
         }
+        if self.new_draft:
+            self.seen_packs[(pack['pack_number'], pack['pick_number'])] = set(pack['card_ids'])
+            self.__get_missing_cards(pack['pack_number'], pack['pick_number'])
+            self.__rank_cards(pack['card_ids'])
+        self.seen_picks[(pick['pack_number'], pick['pick_number'])] = pick['card_id']
         logger.info(f'Human draft pick (combined): {pick}')
 
     def __handle_human_draft_pack(self, json_obj):
@@ -826,6 +851,8 @@ class Follower:
             'card_ids': [int(x) for x in json_obj['PackCards'].split(',')],
             'method': 'Draft.Notify',
         }
+        self.seen_packs[(pack['pack_number'], pack['pick_number'])] = set(pack['card_ids'])
+        self.__get_missing_cards(pack['pack_number'], pack['pick_number'])
         self.__rank_cards(pack['card_ids'])
         logger.info(f'Human draft pack (Draft.Notify): {pack}')
 
