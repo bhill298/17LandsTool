@@ -400,7 +400,8 @@ class Follower:
             card_rank = card_rankings.get(card_name, None)
             if card_rank is None or len(card_rank) == 0 or card_rank[-1] != '%':
                 failed.append((card_name, "???"))
-                logger.warning(f"Warning: Failed to get rank for card {card_name}, got rank string {card_rank}")
+                if len(card_rank) > 0:
+                    logger.warning(f"Warning: Failed to get rank for card {card_name}, got rank string {card_rank}")
             else:
                 results.append((card_name, card_rank))
         results.sort(key=lambda el: float(el[1][:-1]))

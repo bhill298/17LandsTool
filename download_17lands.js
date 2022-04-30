@@ -35,12 +35,12 @@ async function the_thing() {
                 col_map[col.textContent] = i;
             }
         }
-        // set has no data, GIH WR is blank
-        if (rows[1].cells[col_map["GIH WR"]].textContent == "") {
-            continue;
-        }
         for (var i = 1, row; row = rows[i]; i++) {
             results[row.cells[col_map["Name"]].textContent] = row.cells[col_map["GIH WR"]].textContent;
+        }
+        // set has no data, GIH winrate is blank
+        if (Object.values(results).every(el => el === "")) {
+            continue;
         }
         results_json = JSON.stringify(results)
         console.log(results_json);
