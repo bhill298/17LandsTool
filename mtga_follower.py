@@ -74,6 +74,11 @@ POSSIBLE_ROOTS = (
 
 POSSIBLE_CURRENT_FILEPATHS = list(map(lambda root_and_path: os.path.join(*root_and_path), itertools.product(POSSIBLE_ROOTS, (CURRENT_LOG_PATH, ))))
 POSSIBLE_PREVIOUS_FILEPATHS = list(map(lambda root_and_path: os.path.join(*root_and_path), itertools.product(POSSIBLE_ROOTS, (PREVIOUS_LOG_PATH, ))))
+POSSIBLE_MTGA_DIR_PATHS = [
+    os.path.join(os.environ.get("ProgramW6432", ''), "Wizards of the Coast\\MTGA"),
+    os.path.join(os.environ.get("ProgramFiles(x86)", ''), "Wizards of the Coast\\MTGA")
+]
+MTGA_DATA_DIR = "MTGA_Data\\Downloads\\Data"
 
 LOG_START_REGEX_TIMED = re.compile(r'^\[(UnityCrossThreadLogger|Client GRE)\]([\d:/ .-]+(AM|PM)?)')
 LOG_START_REGEX_UNTIMED = re.compile(r'^\[(UnityCrossThreadLogger|Client GRE)\]')
@@ -165,7 +170,7 @@ def clear_console():
 class Follower:
     """Follows along a log, parses the messages, and passes along the parsed data to the API endpoint."""
 
-    def __init__(self):
+    def __init__(self, mtga_dir):
         print("Init start...")
         self.buffer = []
         self.cur_log_time = datetime.datetime.fromtimestamp(0)
@@ -200,7 +205,7 @@ class Follower:
         self.seen_packs = {}
         # (pack_number: int, pick_number: int) -> card_ids: int
         self.seen_picks = {}
-        self.scryfall_data = self.__get_scryfall_data()
+        self.card_data = self.__get_mtga_data(mtga_dir)
         self.card_rankings = self.__get_17lands_data()
         print("Init done")
 
@@ -215,35 +220,77 @@ class Follower:
         return data
 
     @staticmethod
-    def __get_scryfall_data():
+    def __get_mtga_data(mtga_dir):
         FILE_NAME = 'card_data.json'
         file_age = file_age_in_seconds(FILE_NAME)
         if file_age is None or file_age > (60 * 60 * 24 * 7):
-            print(f"Updating scryfall card data! File age = {file_age}")
-            contents = urllib.request.urlopen("https://api.scryfall.com/bulk-data").read()
-            for dat in json.loads(contents)['data']:
-                if dat['name'] == "Default Cards":
-                    urllib.request.urlretrieve(dat['download_uri'], FILE_NAME)
-                    break
-            else:
-                raise RuntimeError("Could not fetch file from scryfall")
-        # post-process data
-        out_dict = {}
-        with open(FILE_NAME, 'r', encoding='utf-8') as f:
-            json_tmp = json.load(f)
-            for el in json_tmp:
-                if 'arena_id' in el:
-                    # 17lands only uses the front side for the name for double-sided cards
-                    name = el['name']
-                    if "//" in name:
-                        name = name.split(" //")[0]
-                    out_dict[el['arena_id']] = name
-        print("Parsed scryfall json file!")
+            print(f"Attempting to regenerate {FILE_NAME} from MTGA data files (file age is {file_age})")
+            if mtga_dir is None:
+                for path in POSSIBLE_MTGA_DIR_PATHS:
+                    if os.path.exists(path):
+                        mtga_dir = path
+                        break
+                else:
+                    raise RuntimeError("Failed to find MTGA application directory. Try specifying manually (see --help).")
+            if not os.path.exists(mtga_dir):
+                raise RuntimeError(f"Could not find specified MTGA application directory: {mtga_dir}.")
+            mtga_data_dir = os.path.join(mtga_dir, MTGA_DATA_DIR)
+            if not os.path.exists(mtga_data_dir):
+                raise RuntimeError(f"Found mtga application directory {mtga_dir}, but could not find data directory {mtga_data_dir}")
+            data_cards = None
+            data_loc = None
+            for data_filename in os.listdir(mtga_data_dir):
+                data_filepath = os.path.join(mtga_data_dir, data_filename)
+                if os.path.isfile(data_filepath):
+                    if data_filename.startswith("Data_cards_"):
+                        data_cards = data_filepath
+                    if data_filename.startswith("Data_loc_"):
+                        data_loc = data_filepath
+            if data_cards is None or data_loc is None:
+                raise RuntimeError(f"Failed to find data cards or data loc file. Data_cards: {data_cards}; Data_loc: {data_loc}")
+            out_dict = {}
+            reverse_dict = defaultdict(set)
+            with open(data_cards, 'r', encoding='utf-8') as f:
+                for el in json.load(f):
+                    card_id = el["grpid"]
+                    title_id = el["titleId"]
+                    out_dict[card_id] = title_id
+                    reverse_dict[title_id].add(card_id)
+            title_ids = set(out_dict.values())
+            with open(data_loc, 'r', encoding='utf-8') as f:
+                for el in json.load(f):
+                    if el["isoCode"] == "en-US":
+                        for key in el["keys"]:
+                                title_id = key["id"]
+                                if title_id in title_ids:
+                                    card_ids = reverse_dict[title_id]
+                                    if "raw" in key:
+                                        card_text = key["raw"]
+                                    else:
+                                        card_text = key["text"]
+                                    for card_id in card_ids:
+                                        out_dict[card_id] = card_text
+                        break
+                else:
+                    raise RuntimeError(f"Failed to find english titles in {data_loc}")
+            # create a copy since we'll be cleaning the dict
+            for card_id, title in list(out_dict.items()):
+                # delete any item that didn't have a title we could find
+                if not isinstance(title, str):
+                    del out_dict[card_id]
+            with open(FILE_NAME, 'w', encoding='utf-8') as f:
+                json.dump(out_dict, f)
+        else:
+            with open(FILE_NAME, 'r', encoding='utf-8') as f:
+                # object hook to force keys to int
+                print(f"Using existing mtga data in {FILE_NAME}")
+                out_dict = json.load(f, object_hook=lambda d: {int(k): v for k, v in d.items()})
+        print("Loaded MTGA data json file")
         return out_dict
 
     def __arena_id_to_card_name(self, card_id):
         try:
-            return self.scryfall_data[int(card_id)]
+            return self.card_data[int(card_id)]
         except KeyError:
             raise RuntimeError(f"MTGA card id {card_id} does not exist!")
 
@@ -987,7 +1034,7 @@ def processing_loop(args):
 
     follow = not args.once
 
-    follower = Follower()
+    follower = Follower(args.dir)
 
     # if running in "normal" mode...
     if args.log_file is None and follow:
@@ -1016,6 +1063,8 @@ def main():
     parser = argparse.ArgumentParser(description='MTGA log follower')
     parser.add_argument('-l', '--log_file',
         help=f'Log filename to process. If not specified, will try one of {POSSIBLE_CURRENT_FILEPATHS}')
+    parser.add_argument('-d', '--dir', default=None,
+        help=f'MTGA application directory. If not specified, will try one of {POSSIBLE_MTGA_DIR_PATHS}')
     parser.add_argument('--once', action='store_true',
         help='Whether to stop after parsing the file once (default is to continue waiting for updates to the file)')
 
