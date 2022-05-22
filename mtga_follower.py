@@ -422,7 +422,16 @@ class Follower:
                     pprint.pprint([self.__arena_id_to_card_name(card_id) for card_id in missing_cards])
                     print('')
 
-    def __rank_cards(self, card_ids):
+    @staticmethod
+    def __percent_to_float(card_rank):
+        return float(card_rank[:-1])
+
+    @staticmethod
+    def __print_card_rankings(card_ranks):
+        print("Card rankings:")
+        pprint.pprint(card_ranks)
+
+    def __rank_cards(self, card_ids, print_results=True):
         self.new_draft = False
         BLACKLIST = set(("Plains", "Island", "Swamp", "Mountain", "Forest"))
         # card_ids is a list of ints
@@ -451,11 +460,12 @@ class Follower:
                     logger.warning(f"Warning: Failed to get rank for card {card_name}, got rank string {card_rank}")
             else:
                 results.append((card_name, card_rank))
-        results.sort(key=lambda el: float(el[1][:-1]))
+        results.sort(key=lambda el: self.__percent_to_float(el[1]))
         results.reverse()
-        print("Card rankings:")
-        pprint.pprint(results + failed)
-        print("\n\n")
+        if print_results:
+            self.__print_card_rankings(results + failed)
+            print("\n\n")
+        return results, failed
 
     def __handle_blob(self, full_log):
         """Attempt to parse a complete log message and send the data if relevant."""
@@ -908,15 +918,29 @@ class Follower:
         """Handle 'Event_SetDeck' messages."""
         self.__clear_game_data()
         decks = json_obj['Deck']
+        maindeck_cards = [d['cardId'] for d in decks['MainDeck'] for i in range(d['quantity'])]
+        sideboard_cards = [d['cardId'] for d in decks['Sideboard'] for i in range(d['quantity'])]
         deck = {
             'player_id': self.cur_user,
             'event_name': json_obj['EventName'],
             'time': self.cur_log_time.isoformat(),
-            'maindeck_card_ids': [d['cardId'] for d in decks['MainDeck'] for i in range(d['quantity'])],
-            'sideboard_card_ids': [d['cardId'] for d in decks['Sideboard'] for i in range(d['quantity'])],
+            'maindeck_card_ids': maindeck_cards,
+            'sideboard_card_ids': sideboard_cards,
             'companion': decks['Companions'][0]['cardId'] if len(decks['Companions']) > 0 else 0,
             'is_during_match': False,
         }
+        print("Submitted deck:")
+        maindeck_rankings, maindeck_failed = self.__rank_cards(maindeck_cards, print_results=False)
+        sideboard_rankings, sideboard_failed = self.__rank_cards(sideboard_cards, print_results=False)
+        rank_sum = 0
+        for _, rank in maindeck_rankings:
+            rank_sum += self.__percent_to_float(rank)
+        self.__print_card_rankings(maindeck_rankings + maindeck_failed)
+        print(f"Mean card rank: {rank_sum/len(maindeck_rankings)}")
+        print('\n')
+        print("Sideboard cards:")
+        self.__print_card_rankings(sideboard_rankings + sideboard_failed)
+        print("\n\n")
         logger.info(f'Deck submission (Event_SetDeck): {deck}')
 
     def __handle_self_rank_info(self, json_obj):
