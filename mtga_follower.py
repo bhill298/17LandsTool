@@ -199,6 +199,7 @@ class Follower:
         self.cards_in_hand = defaultdict(list)
         self.user_screen_name = None
         self.new_draft = False
+        self.skip_output = False
         self.screen_names = defaultdict(lambda: '')
         self.game_history_events = []
         # (pack_number: int, pick_number: int) -> [card_ids: int]
@@ -294,20 +295,24 @@ class Follower:
         except KeyError:
             raise RuntimeError(f"MTGA card id {card_id} does not exist!")
 
-    def parse_log(self, filename, follow):
+    def parse_log(self, filename, follow, skip_old=False):
         """
         Parse messages from a log file and pass the data along to the API endpoint.
 
-        :param filename: The filename for the log file to parse.
-        :param follow:   Whether or not to continue looking for updates to the file after parsing
-                         all the initial lines.
+        :param filename:   The filename for the log file to parse.
+        :param follow:     Whether or not to continue looking for updates to the file after parsing
+                           all the initial lines.
+        :param skip_old:   If True, only parse new log entries created after the program starts.
+                           If follow is False, this will print nothing for that log file.
         """
+        first_pass = True
         while True:
             last_read_time = time.time()
             last_file_size = 0
             try:
                 with open(filename, errors='replace') as f:
                     while True:
+                        self.skip_output = skip_old and first_pass
                         line = f.readline()
                         file_size = pathlib.Path(filename).stat().st_size
                         if line:
@@ -316,6 +321,7 @@ class Follower:
                             last_file_size = file_size
                         else:
                             self.__handle_complete_log_entry()
+                            first_pass = False
                             last_modified_time = os.stat(filename).st_mtime
                             if file_size < last_file_size:
                                 logger.info(f'Starting from beginning of file as file is smaller than before (previous = {last_file_size}; current = {file_size})')
@@ -329,7 +335,6 @@ class Follower:
                                 break
             except FileNotFoundError:
                 time.sleep(SLEEP_TIME)
-
             if not follow:
                 logger.info('Done processing file.')
                 break
@@ -418,18 +423,19 @@ class Follower:
                 original_pack = self.seen_packs[(pack, original_pick)] - set([self.seen_picks[(pack, original_pick)]])
                 if (pack, pick) in self.seen_packs:
                     missing_cards = original_pack - self.seen_packs[(pack, pick)]
-                    print(f"Missing cards for pack {pack} pick {pick}:")
-                    pprint.pprint([self.__arena_id_to_card_name(card_id) for card_id in missing_cards])
-                    print('')
+                    if not self.skip_output:
+                        print(f"Missing cards for pack {pack} pick {pick}:")
+                        pprint.pprint([self.__arena_id_to_card_name(card_id) for card_id in missing_cards])
+                        print('')
 
     @staticmethod
     def __percent_to_float(card_rank):
         return float(card_rank[:-1])
 
-    @staticmethod
-    def __print_card_rankings(card_ranks):
-        print("Card rankings:")
-        pprint.pprint(card_ranks)
+    def __print_card_rankings(self, card_ranks):
+        if not self.skip_output:
+            print("Card rankings:")
+            pprint.pprint(card_ranks)
 
     def __rank_cards(self, card_ids, print_results=True):
         self.new_draft = False
@@ -462,7 +468,7 @@ class Follower:
                 results.append((card_name, card_rank))
         results.sort(key=lambda el: self.__percent_to_float(el[1]))
         results.reverse()
-        if print_results:
+        if print_results and not self.skip_output:
             self.__print_card_rankings(results + failed)
             print("\n\n")
         return results, failed
@@ -929,18 +935,19 @@ class Follower:
             'companion': decks['Companions'][0]['cardId'] if len(decks['Companions']) > 0 else 0,
             'is_during_match': False,
         }
-        print("Submitted deck:")
-        maindeck_rankings, maindeck_failed = self.__rank_cards(maindeck_cards, print_results=False)
-        sideboard_rankings, sideboard_failed = self.__rank_cards(sideboard_cards, print_results=False)
-        rank_sum = 0
-        for _, rank in maindeck_rankings:
-            rank_sum += self.__percent_to_float(rank)
-        self.__print_card_rankings(maindeck_rankings + maindeck_failed)
-        print(f"Mean card rank: {rank_sum/len(maindeck_rankings)}")
-        print('\n')
-        print("Sideboard cards:")
-        self.__print_card_rankings(sideboard_rankings + sideboard_failed)
-        print("\n\n")
+        if not self.skip_output:
+            print("Submitted deck:")
+            maindeck_rankings, maindeck_failed = self.__rank_cards(maindeck_cards, print_results=False)
+            sideboard_rankings, sideboard_failed = self.__rank_cards(sideboard_cards, print_results=False)
+            rank_sum = 0
+            for _, rank in maindeck_rankings:
+                rank_sum += self.__percent_to_float(rank)
+            self.__print_card_rankings(maindeck_rankings + maindeck_failed)
+            print(f"Mean card rank: {rank_sum/len(maindeck_rankings)}")
+            print('\n')
+            print("Sideboard cards:")
+            self.__print_card_rankings(sideboard_rankings + sideboard_failed)
+            print("\n\n")
         logger.info(f'Deck submission (Event_SetDeck): {deck}')
 
     def __handle_self_rank_info(self, json_obj):
@@ -1066,7 +1073,7 @@ def processing_loop(args):
         for filename in POSSIBLE_PREVIOUS_FILEPATHS:
             if os.path.exists(filename):
                 logger.info(f'Parsing the previous log {filename} once')
-                follower.parse_log(filename=filename, follow=False)
+                follower.parse_log(filename=filename, follow=False, skip_old=args.skip_old)
                 break
 
     # tail and parse current logfile to handle ongoing events
@@ -1075,7 +1082,7 @@ def processing_loop(args):
         if os.path.exists(filename):
             any_found = True
             logger.info(f'Following along {filename}')
-            follower.parse_log(filename=filename, follow=follow)
+            follower.parse_log(filename=filename, follow=follow, skip_old=args.skip_old)
 
     if not any_found:
         logger.warning("Found no files to parse. Try to find Arena's Player.log file and pass it as an argument with -l")
@@ -1091,6 +1098,8 @@ def main():
         help=f'MTGA application directory. If not specified, will try one of {POSSIBLE_MTGA_DIR_PATHS}')
     parser.add_argument('--once', action='store_true',
         help='Whether to stop after parsing the file once (default is to continue waiting for updates to the file)')
+    parser.add_argument('-s', '--skip-old', action='store_true',
+        help='If set, will not print previously existing draft data and will only start printing for logs created after this is launched.')
 
     args = parser.parse_args()
 
