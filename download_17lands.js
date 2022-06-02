@@ -5,6 +5,24 @@ function sleep(ms) {
 }
 
 async function the_thing(arguments) {
+    if (arguments[1] !== null) {
+        var format_dropdown = $("#format")[0];
+        var max_format_index = format_dropdown.length;
+        var name_map = {"premier": "PremierDraft", "trad": "TradDraft", "quick": "QuickDraft", "cube": "CubeDraft"};
+        var converted_arg = name_map[arguments[1]];
+        for (var format_index = 0; format_index < max_format_index; format_index++) {
+            format_dropdown.selectedIndex = format_index;
+            if (converted_arg.toUpperCase() === format_dropdown.value.toUpperCase()) {
+                format_dropdown.dispatchEvent(new Event('change', { bubbles: true }));
+                break;
+            }
+        }
+        // PremierDraft, TradDraft, QuickDraft, CubeDraft
+        if (format_index === max_format_index) {
+            // return an error if invalid
+            return null;
+        }
+    }
     var selection;
     var rows;
     var col_map = {};
@@ -18,7 +36,7 @@ async function the_thing(arguments) {
         rows = undefined;
         results = {};
         expansion_dropdown.selectedIndex = set_index;
-        if (arguments[0] == null || arguments[0].toUpperCase() === expansion_dropdown.value.toUpperCase()) {
+        if (arguments[0] === null || arguments[0].toUpperCase() === expansion_dropdown.value.toUpperCase()) {
             expansion_dropdown.dispatchEvent(new Event('change', { bubbles: true }));
         }
         else {

@@ -8,9 +8,10 @@ from selenium.common.exceptions import TimeoutException
 parser = argparse.ArgumentParser(description="Download 17Lands json files")
 parser.add_argument('-s', '--set', default=None,
     help="Download logs for one set, passing in expansion code (e.g. SNC, NEO, VOW). If not provided, download logs for all sets.")
+parser.add_argument('-t', '--draft-type', default=None, choices=("premier", "trad", "quick", "cube"),
+    help="Get results for a different draft type instead of the default (premier draft).")
 
 args = parser.parse_args()
-
 # Need google chrome installed, and webdriver extrected to a dir in system path (https://chromedriver.chromium.org/)
 driver = webdriver.Chrome()
 driver.minimize_window()
@@ -20,8 +21,7 @@ script_contents = ''
 with open("download_17lands.js", 'r') as f:
     script_contents = f.read()
 driver.set_script_timeout(300)
-script_args = []
-script_args.append(args.set)
+script_args = [args.set, args.draft_type]
 try:
     res = driver.execute_script(script_contents, *script_args)
     if res is None:
@@ -32,5 +32,7 @@ try:
         with open(filename, 'w') as f:
             json.dump(results, f)
 except TimeoutException:
-    pass
+    print("Error: script timed out")
+except RuntimeError as e:
+    print(f"Error: {e}")
 driver.quit()
