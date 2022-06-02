@@ -7,11 +7,14 @@ from selenium.common.exceptions import TimeoutException
 
 parser = argparse.ArgumentParser(description="Download 17Lands json files")
 parser.add_argument('-s', '--set', default=None,
-    help="Download logs for one set, passing in expansion code (e.g. SNC, NEO, VOW). If not provided, download logs for all sets.")
+    help="Download logs for specific sets (comma-separated), passing in expansion names (e.g. SNC, NEO, VOW). "
+         "If not provided, download logs for all sets.")
 parser.add_argument('-t', '--draft-type', default=None, choices=("premier", "trad", "quick", "cube"),
     help="Get results for a different draft type instead of the default (premier draft).")
 
 args = parser.parse_args()
+if args.set is not None:
+    args.set = [s.strip() for s in args.set.split(',')]
 # Need google chrome installed, and webdriver extrected to a dir in system path (https://chromedriver.chromium.org/)
 driver = webdriver.Chrome()
 driver.minimize_window()

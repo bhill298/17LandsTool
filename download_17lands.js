@@ -36,7 +36,7 @@ async function the_thing(arguments) {
         rows = undefined;
         results = {};
         expansion_dropdown.selectedIndex = set_index;
-        if (arguments[0] === null || arguments[0].toUpperCase() === expansion_dropdown.value.toUpperCase()) {
+        if (arguments[0] === null || arguments[0].some(el => el.toUpperCase() === expansion_dropdown.value.toUpperCase())) {
             expansion_dropdown.dispatchEvent(new Event('change', { bubbles: true }));
         }
         else {

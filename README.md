@@ -14,6 +14,6 @@ This is command line only and has no GUI.
 
 Card winrates will not be shown for pack 1 pick 1 from what I've tested. As far as I can tell, arena just isn't generating the events for this, so can't really do anything about it right now.
 
-17Lands may rate limit you if you try to run the `get_17lands_files.py` script too much.
+17Lands may rate limit you if you try to run the `get_17lands_files.py` script too much. Getting data for all the sets at once seems to start returing all 0s in the tables after a while, so it's recommended that you only do a few sets at a time (e.g. `get_17lands_files.py -s snc,dbl,neo,vow,dom`).
 
 Delete card_data.json if new cards just came out to force regenerate card ID data from MTGA. If you aren't on Windows or have MTGA in an unexpected directory, you may have to pass the --dir flag to mtga_follower.py manually.
