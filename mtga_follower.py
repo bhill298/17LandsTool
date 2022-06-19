@@ -221,66 +221,70 @@ class Follower:
         return data
 
     @staticmethod
-    def __get_mtga_data(mtga_dir):
+    def __get_mtga_data(mtga_dir, dont_regen=False):
         FILE_NAME = 'card_data.json'
         file_age = file_age_in_seconds(FILE_NAME)
-        if file_age is None or file_age > (60 * 60 * 24 * 7):
-            print(f"Attempting to regenerate {FILE_NAME} from MTGA data files (file age is {file_age})")
-            if mtga_dir is None:
-                for path in POSSIBLE_MTGA_DIR_PATHS:
-                    if os.path.exists(path):
-                        mtga_dir = path
-                        break
-                else:
-                    raise RuntimeError("Failed to find MTGA application directory. Try specifying manually (see --help).")
-            if not os.path.exists(mtga_dir):
-                raise RuntimeError(f"Could not find specified MTGA application directory: {mtga_dir}.")
-            mtga_data_dir = os.path.join(mtga_dir, MTGA_DATA_DIR)
-            if not os.path.exists(mtga_data_dir):
-                raise RuntimeError(f"Found mtga application directory {mtga_dir}, but could not find data directory {mtga_data_dir}")
-            data_cards = None
-            data_loc = None
-            for data_filename in os.listdir(mtga_data_dir):
-                data_filepath = os.path.join(mtga_data_dir, data_filename)
-                if os.path.isfile(data_filepath):
-                    if data_filename.startswith("Data_cards_"):
-                        data_cards = data_filepath
-                    if data_filename.startswith("Data_loc_"):
-                        data_loc = data_filepath
-            if data_cards is None or data_loc is None:
-                raise RuntimeError(f"Failed to find data cards or data loc file. Data_cards: {data_cards}; Data_loc: {data_loc}")
-            out_dict = {}
-            reverse_dict = defaultdict(set)
-            with open(data_cards, 'r', encoding='utf-8') as f:
-                for el in json.load(f):
-                    card_id = el["grpid"]
-                    title_id = el["titleId"]
-                    out_dict[card_id] = title_id
-                    reverse_dict[title_id].add(card_id)
-            title_ids = set(out_dict.values())
-            with open(data_loc, 'r', encoding='utf-8') as f:
-                for el in json.load(f):
-                    if el["isoCode"] == "en-US":
-                        for key in el["keys"]:
-                                title_id = key["id"]
-                                if title_id in title_ids:
-                                    card_ids = reverse_dict[title_id]
-                                    if "raw" in key:
-                                        card_text = key["raw"]
-                                    else:
-                                        card_text = key["text"]
-                                    for card_id in card_ids:
-                                        out_dict[card_id] = card_text
-                        break
-                else:
-                    raise RuntimeError(f"Failed to find english titles in {data_loc}")
-            # create a copy since we'll be cleaning the dict
-            for card_id, title in list(out_dict.items()):
-                # delete any item that didn't have a title we could find
-                if not isinstance(title, str):
-                    del out_dict[card_id]
-            with open(FILE_NAME, 'w', encoding='utf-8') as f:
-                json.dump(out_dict, f)
+        if not dont_regen and (file_age is None or file_age > (60 * 60 * 24 * 7)):
+            try:
+                print(f"Attempting to regenerate {FILE_NAME} from MTGA data files (file age is {file_age})")
+                if mtga_dir is None:
+                    for path in POSSIBLE_MTGA_DIR_PATHS:
+                        if os.path.exists(path):
+                            mtga_dir = path
+                            break
+                    else:
+                        raise RuntimeError("Failed to find MTGA application directory. Try specifying manually (see --help).")
+                if not os.path.exists(mtga_dir):
+                    raise RuntimeError(f"Could not find specified MTGA application directory: {mtga_dir}.")
+                mtga_data_dir = os.path.join(mtga_dir, MTGA_DATA_DIR)
+                if not os.path.exists(mtga_data_dir):
+                    raise RuntimeError(f"Found mtga application directory {mtga_dir}, but could not find data directory {mtga_data_dir}")
+                data_cards = None
+                data_loc = None
+                for data_filename in os.listdir(mtga_data_dir):
+                    data_filepath = os.path.join(mtga_data_dir, data_filename)
+                    if os.path.isfile(data_filepath):
+                        if data_filename.startswith("Data_cards_"):
+                            data_cards = data_filepath
+                        if data_filename.startswith("Data_loc_"):
+                            data_loc = data_filepath
+                if data_cards is None or data_loc is None:
+                    raise RuntimeError(f"Failed to find data cards or data loc file. Data_cards: {data_cards}; Data_loc: {data_loc}")
+                out_dict = {}
+                reverse_dict = defaultdict(set)
+                with open(data_cards, 'r', encoding='utf-8') as f:
+                    for el in json.load(f):
+                        card_id = el["grpid"]
+                        title_id = el["titleId"]
+                        out_dict[card_id] = title_id
+                        reverse_dict[title_id].add(card_id)
+                title_ids = set(out_dict.values())
+                with open(data_loc, 'r', encoding='utf-8') as f:
+                    for el in json.load(f):
+                        if el["isoCode"] == "en-US":
+                            for key in el["keys"]:
+                                    title_id = key["id"]
+                                    if title_id in title_ids:
+                                        card_ids = reverse_dict[title_id]
+                                        if "raw" in key:
+                                            card_text = key["raw"]
+                                        else:
+                                            card_text = key["text"]
+                                        for card_id in card_ids:
+                                            out_dict[card_id] = card_text
+                            break
+                    else:
+                        raise RuntimeError(f"Failed to find english titles in {data_loc}")
+                # create a copy since we'll be cleaning the dict
+                for card_id, title in list(out_dict.items()):
+                    # delete any item that didn't have a title we could find
+                    if not isinstance(title, str):
+                        del out_dict[card_id]
+                with open(FILE_NAME, 'w', encoding='utf-8') as f:
+                    json.dump(out_dict, f)
+            except RuntimeError as e:
+                print(f"Failed to generate card data with error: {str(e)}, falling back to old file")
+                return Follower.__get_mtga_data(mtga_dir, dont_regen=True)
         else:
             with open(FILE_NAME, 'r', encoding='utf-8') as f:
                 # object hook to force keys to int
