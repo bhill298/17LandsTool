@@ -271,17 +271,17 @@ class Follower:
         FILE_NAME = 'card_data.json'
         file_age = file_age_in_seconds(FILE_NAME)
         if not dont_regen and (file_age is None or file_age > (60 * 60 * 24 * 7)):
+            print(f"Attempting to regenerate {FILE_NAME} from MTGA data files (file age is {file_age})")
+            if mtga_dir is None:
+                for path in POSSIBLE_MTGA_DIR_PATHS:
+                    if os.path.exists(path):
+                        mtga_dir = path
+                        break
+                else:
+                    raise RuntimeError("Failed to find MTGA application directory. Try specifying manually (see --help).")
+            if not os.path.exists(mtga_dir):
+                raise RuntimeError(f"Could not find specified MTGA application directory: {mtga_dir}.")
             try:
-                print(f"Attempting to regenerate {FILE_NAME} from MTGA data files (file age is {file_age})")
-                if mtga_dir is None:
-                    for path in POSSIBLE_MTGA_DIR_PATHS:
-                        if os.path.exists(path):
-                            mtga_dir = path
-                            break
-                    else:
-                        raise RuntimeError("Failed to find MTGA application directory. Try specifying manually (see --help).")
-                if not os.path.exists(mtga_dir):
-                    raise RuntimeError(f"Could not find specified MTGA application directory: {mtga_dir}.")
                 mtga_data_dir = os.path.join(mtga_dir, MTGA_DATA_DIR)
                 if not os.path.exists(mtga_data_dir):
                     raise RuntimeError(f"Found mtga application directory {mtga_dir}, but could not find data directory {mtga_data_dir}")
