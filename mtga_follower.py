@@ -991,18 +991,22 @@ class Follower:
             'is_during_match': False,
         }
         if not self.skip_output:
-            print("Submitted deck:")
-            maindeck_rankings, maindeck_failed = self.__rank_cards(maindeck_cards, print_results=False)
-            sideboard_rankings, sideboard_failed = self.__rank_cards(sideboard_cards, print_results=False)
-            rank_sum = 0
-            for _, rank in maindeck_rankings:
-                rank_sum += self.__percent_to_float(rank)
-            self.__print_card_rankings(maindeck_rankings + maindeck_failed)
-            print(f"Mean card rank: {rank_sum/len(maindeck_rankings)}")
-            print('\n')
-            print("Sideboard cards:")
-            self.__print_card_rankings(sideboard_rankings + sideboard_failed)
-            print("\n\n")
+            try:
+                maindeck_rankings, maindeck_failed = self.__rank_cards(maindeck_cards, print_results=False)
+                sideboard_rankings, sideboard_failed = self.__rank_cards(sideboard_cards, print_results=False)
+                rank_sum = 0
+                for _, rank in maindeck_rankings:
+                    rank_sum += self.__percent_to_float(rank)
+                self.__print_card_rankings(maindeck_rankings + maindeck_failed)
+                print("Submitted deck:")
+                print(f"Mean card rank: {rank_sum/len(maindeck_rankings)}")
+                print('\n')
+                print("Sideboard cards:")
+                self.__print_card_rankings(sideboard_rankings + sideboard_failed)
+                print("\n\n")
+            except RuntimeError:
+                # not a valid draft event (expected, could just be constructed or another event)
+                pass
         logger.info(f'Deck submission (Event_SetDeck): {deck}')
 
     def __handle_self_rank_info(self, json_obj):
