@@ -24,12 +24,12 @@ import os.path
 import pathlib
 import pprint
 import re
+import sqlite3
 import stat
 import subprocess
 import sys
 import time
 import traceback
-import urllib.request
 
 from collections import defaultdict
 
@@ -79,6 +79,7 @@ POSSIBLE_MTGA_DIR_PATHS = [
     os.path.join(os.environ.get("ProgramFiles(x86)", ''), "Wizards of the Coast\\MTGA")
 ]
 MTGA_DATA_DIR = "MTGA_Data\\Downloads\\Data"
+MTGA_RAW_DIR = "MTGA_Data\\Downloads\\Raw"
 
 LOG_START_REGEX_TIMED = re.compile(r'^\[(UnityCrossThreadLogger|Client GRE)\]([\d:/ .-]+(AM|PM)?)')
 LOG_START_REGEX_UNTIMED = re.compile(r'^\[(UnityCrossThreadLogger|Client GRE)\]')
@@ -221,6 +222,51 @@ class Follower:
         return data
 
     @staticmethod
+    def __get_mtga_raw_data(mtga_dir):
+        # fallback to pull data from raw directory
+        mtga_raw_dir = os.path.join(mtga_dir, MTGA_RAW_DIR)
+        if not os.path.exists(mtga_raw_dir):
+            raise RuntimeError(f"Found mtga application directory {mtga_dir}, but could not find raw directory {mtga_raw_dir}")
+        data_files = os.listdir(mtga_raw_dir)
+        try:
+            cards_file = os.path.join(mtga_raw_dir, [f for f in data_files if f.startswith("Raw_cards")][0])
+            cards_db_file = os.path.join(mtga_raw_dir, [f for f in data_files if f.startswith("Raw_CardDatabase")][0])
+        except IndexError:
+            raise RuntimeError(f"Failed to get filenames from raw data directory at {mtga_raw_dir}")
+        try:
+            cards_json = json.load(open(cards_file, 'r', encoding="utf-8"))
+        except (json.JSONDecodeError, FileNotFoundError):
+            raise RuntimeError(f"Failed to load raw json cards file {cards_file}")
+        try:
+            con = sqlite3.connect(cards_db_file)
+            cur = con.cursor()
+        except sqlite3.Error:
+            raise RuntimeError(f"Failed to load sqlite db {cards_db_file}")
+
+        out_dict = {}
+        reverse_dict = defaultdict(set)
+
+        for card in cards_json:
+            card_id = card["grpid"]
+            title_id = card["titleId"]
+            out_dict[card_id] = title_id
+            reverse_dict[title_id].add(card_id)
+        title_ids = set(out_dict.values())
+
+        # indices below are based on the current table schema, if it changes, see the below:
+        # cur.execute("SELECT * FROM sqlite_master WHERE type='table'")
+        # cur.execute("PRAGMA table_info('Localizations')")
+        cur.execute("SELECT * from Localizations")
+        for row in cur.fetchall():
+            title_id = row[0]
+            card_title = row[3]
+            if title_id in title_ids:
+                card_ids = reverse_dict[title_id]
+                for card_id in card_ids:
+                    out_dict[card_id] = card_title
+        return out_dict
+
+    @staticmethod
     def __get_mtga_data(mtga_dir, dont_regen=False):
         FILE_NAME = 'card_data.json'
         file_age = file_age_in_seconds(FILE_NAME)
@@ -280,11 +326,16 @@ class Follower:
                     # delete any item that didn't have a title we could find
                     if not isinstance(title, str):
                         del out_dict[card_id]
-                with open(FILE_NAME, 'w', encoding='utf-8') as f:
-                    json.dump(out_dict, f)
             except RuntimeError as e:
-                print(f"Failed to generate card data with error: {str(e)}, falling back to old file")
-                return Follower.__get_mtga_data(mtga_dir, dont_regen=True)
+                print(f"Failed to generate card data with error: {str(e)}, trying raw directory fallback.")
+                try:
+                    out_dict = Follower.__get_mtga_raw_data(mtga_dir)
+                    print("Fallback was successful!")
+                except RuntimeError as e:
+                    print(f"First attempt and fallback to regenerate card data failed: '{str(e)}', will try to fall back to previously generated file.")
+                    return Follower.__get_mtga_data(mtga_dir, dont_regen=True)
+            with open(FILE_NAME, 'w', encoding='utf-8') as f:
+                json.dump(out_dict, f)
         else:
             with open(FILE_NAME, 'r', encoding='utf-8') as f:
                 # object hook to force keys to int
